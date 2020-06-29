@@ -112,7 +112,10 @@ class parse_json_schema(Schema):
                         allow_none=True)
     username = fields.Bool(allow_none=True)
     notify = fields.Bool(allow_none=True)
+    increment = fields.Bool(allow_none=True)
     disable_brain = fields.Bool(allow_none=True)
+    incement_min = fields.Int(allow_none=True, validate=Range(min=0, max=20))
+    increment_max = fields.Int(allow_none=True, validate=Range(min=0, max=20))
     mask = fields.Str(allow_none=True, validate=StringContains(r'[^aldsu\?0-9a-zA-Z]'))
     mask_file = fields.List(fields.String(validate=[StringContains(r'[\W]\-'),
                                                     Length(min=1, max=60)]),
@@ -146,6 +149,9 @@ def get_jobdetails(job_details):
                     'rules',
                     'name',
                     'username',
+                    'increment',
+                    'increment_min',
+                    'increment_max',
                     'disable_brain',
                     'restore']
     ###***make this less ugly
@@ -449,12 +455,12 @@ class Sso(Resource):
                 login_user(user)
             else:
                 logging.error('No user object loaded')
-                return json.dumps({"msg": "Bad username or password"}), 401
+                return {"msg": "Bad username or password"}, 401
             return redirect('/')
         else:
             ###***add error output to debug
             logger.info('Login error')
-            return json.dumps({"msg": "Bad username or password"}), 401
+            return {"msg": "Bad username or password"}, 401
 
 
 class Login(Resource):
@@ -900,7 +906,7 @@ class Queuing(Resource):
                         cur_list = started.get_job_ids()
                         if job_id in cur_list:
                             logger.error('Job is already running')
-                            return json.dumps({'msg': 'Job is already running'}), 500
+                            return {'msg': 'Job is already running'}, 500
                 marsh_schema.data['batch_job'].sort(key=itemgetter('place'))
                 for job in self.q.jobs:
                     job.set_status('finished')
@@ -921,7 +927,7 @@ class Queuing(Resource):
             except Exception as err:
                 ###***fix to specific exception types
                 logger.error('Reorder failed: {}'.format(err))
-                return 500
+                return {'msg': 'Reorder failed'}, 500
 
     @login_required
     def patch(self, job_id):
@@ -1224,10 +1230,10 @@ class Adder(Resource):
                     q_dict = self.crack_q.q_monitor(self.q)
                     if job_id in cur_list:
                         logger.error('Job is already running')
-                        return json.dumps({'msg': 'Job is already running'}), 500
+                        return {'msg': 'Job is already running'}, 500
                     if job_id in q_dict['Queued Jobs'].keys():
                         logger.error('Job is already queued')
-                        return json.dumps({'msg': 'Job is already queued'}), 500
+                        return {'msg': 'Job is already queued'}, 500
                     ###***SET THIS TO CHECK MATCHES IN A DICT RATHER THAN DIRECT
                     ###***REVIEW ALL CONCATINATION
                     ###***taking input here, review
@@ -1238,8 +1244,7 @@ class Adder(Resource):
                     job = self.q.fetch_job(job_id)
                     if not job_deets:
                         logger.debug('Job restor error. Never started')
-                        return json.dumps({'msg': 'Error restoring job'}), 500
-                        #return json.dumps({'msg': 'Job restore error.'}), 500
+                        return {'msg': 'Error restoring job'}, 500
                     elif not job_deets['restore']:
                         logger.debug('Job not previously started, restore = 0')
                         job_deets['restore'] == 0
@@ -1251,7 +1256,7 @@ class Adder(Resource):
                         wordlist = None
                     rules = check_rules(job_deets['rules'])
                     if rules is False:
-                        return json.dumps({'msg': 'Invalid rules selected'}), 500
+                        return {'msg': 'Invalid rules selected'}, 500
                     mask_file = check_mask(job_deets['mask'])
                     # this is just set to use the first mask file in the list for now
                     mask = mask_file if mask_file else job_deets['mask']
@@ -1269,6 +1274,9 @@ class Adder(Resource):
                         'rules': rules,
                         'restore': job_deets['restore'],
                         'username': job_deets['username'] if 'user' in job_deets else None,
+                        'increment': job_deets['increment'] if 'increment' in job_deets else None,
+                        'increment_min': job_deets['increment_min'] if 'increment_min' in job_deets else None,
+                        'increment_max': job_deets['increment_max'] if 'increment_max' in job_deets else None,
                         'brain': False if 'disable_brain' in job_deets else True,
                         'name': job_deets['name'] if 'name' in job_deets else None,
                         'pot_path': pot_path,
@@ -1278,9 +1286,9 @@ class Adder(Resource):
                     job.meta['CrackQ State'] = 'Run/Restored'
                     job.save_meta()
                 else:
-                    return json.dumps({'msg': 'Invalid Job ID'}), 500
+                    return {'msg': 'Invalid Job ID'}, 500
             else:
-                return json.dumps({'msg': 'Invalid Job ID'}), 500
+                return {'msg': 'Invalid Job ID'}, 500
         else:
             logger.debug('Creating new session')
             job_id = uuid.uuid4().hex
@@ -1305,7 +1313,7 @@ class Adder(Resource):
                         hash_fh.write(hash_l.rstrip() + '\n')
             except KeyError as err:
                 logger.debug('No hash list provided: {}'.format(err))
-                return json.dumps({'msg': 'No hashes provided'}), 500
+                return {'msg': 'No hashes provided'}, 500
             try:
                 args['hash_mode']
                 check_m = self.mode_check(args['hash_mode'])
@@ -1320,15 +1328,15 @@ class Adder(Resource):
                 except TypeError as err:
                     logger.error('Incorrect type supplied for hash_mode:'
                                  '\n{}'.format(err))
-                    return json.dumps({'msg': 'Invalid hash mode selected'}), 500
+                    return {'msg': 'Invalid hash mode selected'}, 500
             else:
-                return json.dumps({'msg': 'Invalid hash mode selected'}), 500
+                return {'msg': 'Invalid hash mode selected'}, 500
             ###***add checks??
             if attack_mode != 3:
                 if args['wordlist'] in CRACK_CONF['wordlists']:
                     wordlist = CRACK_CONF['wordlists'][args['wordlist']]
                 else:
-                    return json.dumps({'msg': 'Invalid wordlist selected'}), 500
+                    return {'msg': 'Invalid wordlist selected'}, 500
             try:
                 mask_file = check_mask(args['mask_file'])
             except KeyError:
@@ -1341,12 +1349,27 @@ class Adder(Resource):
             mask = mask_file[0] if mask_file else mask
             rules = check_rules(args['rules'])
             if rules is False:
-                return json.dumps({'msg': 'Invalid rules selected'}), 500
+                return {'msg': 'Invalid rules selected'}, 500
             try:
                 username = args['username']
             except KeyError as err:
                 logger.debug('Username value not provided')
                 username = False
+            try:
+                increment = args['increment']
+            except KeyError as err:
+                logger.debug('Increment value not provided')
+                increment = False
+            try:
+                increment_min = args['increment_min']
+            except KeyError as err:
+                logger.debug('Increment min value not provided')
+                increment_min = None
+            try:
+                increment_max = args['increment_max']
+            except KeyError as err:
+                logger.debug('Increment max value not provided')
+                increment_max = None
             try:
                 logger.debug(args)
                 if args['disable_brain']:
@@ -1389,14 +1412,18 @@ class Adder(Resource):
                 'rules': rules,
                 #'#restore': restore if restore else None,
                 'username': username,
+                'increment': increment,
+                'increment_min': increment_min,
+                'increment_max': increment_max,
                 'brain': brain,
                 'name': name,
                 'pot_path': pot_path,
-                    }
+                }
         q_args = {
-                'func': self.crack.hc_worker,
-                'job_id': job_id,
-                'kwargs': hc_args}
+            'func': self.crack.hc_worker,
+            'job_id': job_id,
+            'kwargs': hc_args,
+            }
         try:
             q = self.crack_q.q_connect()
             self.crack_q.q_add(q, q_args)
@@ -1405,16 +1432,18 @@ class Adder(Resource):
             job = self.q.fetch_job(job_id)
             job.meta['email_count'] = 0
             job.meta['notify'] = args['notify']
-            if current_user.email is not None and current_user.email != 'null':
-                if email_check(current_user.email):
-                    job.meta['email'] = str(current_user.email)
-                    job.meta['last_seen'] = str(current_user.last_seen)
+            if email_check(current_user.email):
+                job.meta['email'] = str(current_user.email)
+                job.meta['last_seen'] = str(current_user.last_seen)
             elif email_check(current_user.username):
                 job.meta['email'] = current_user.username
                 job.meta['last_seen'] = str(current_user.last_seen)
             job.meta['CrackQ State'] = 'Run'
             job.meta['Speed Array'] = []
             job.save_meta()
+            return job_id, 202
+        except KeyError as err:
+            logger.warning('Key missing from meta data:\n{}'.format(err))
             return job_id, 202
         ###***make this more specific?
         except Exception as err:
@@ -1487,7 +1516,7 @@ class Reports(Resource):
             comp = rq.registry.FinishedJobRegistry('reports',
                                                    connection=self.redis_con)
             started = rq.registry.StartedJobRegistry('reports',
-                                                    connection=self.redis_con)
+                                                     connection=self.redis_con)
             reports_dict = {}
             reports_dict.update({j: 'Generated' for j in comp.get_job_ids()})
             reports_dict.update({j: 'Failed' for j in failed.get_job_ids()})
@@ -1520,10 +1549,10 @@ class Reports(Resource):
                             return json.loads(rep.read()), 200
                     except IOError as err:
                         logger.debug('Error reading report: {}'.format(err))
-                        return json.dumps({'msg': 'No report generated for'
-                                                  'this job'}), 500
+                        return {'msg': 'No report generated for'
+                                       'this job'}, 500
         else:
-            return json.dumps({'msg': 'Invalid Job ID'}), 404
+            return {'msg': 'Invalid Job ID'}, 404
 
     @login_required
     def post(self):
@@ -1582,16 +1611,16 @@ class Reports(Resource):
                                                     result_ttl=604800,
                                                     job_id='{}_report'.format(job_id))
                         if rep:
-                            return json.dumps({'msg': 'Successfully queued '
-                                               'report generation'}), 202
+                            return {'msg': 'Successfully queued '
+                                               'report generation'}, 202
                         else:
-                            return json.dumps({'msg': 'Error no report data '
-                                               'returned'}), 500
+                            return {'msg': 'Error no report data '
+                                               'returned'}, 500
                     except IOError as err:
                         logger.debug('No cracked passwords found for this job')
-                        return json.dumps({'msg': 'No report available for Job ID'}), 404
+                        return {'msg': 'No report available for Job ID'}, 404
         else:
-            return json.dumps({'msg': 'Invalid Job ID'}), 404
+            return {'msg': 'Invalid Job ID'}, 404
 
 
 #app = Flask(__name__)
